@@ -18,9 +18,9 @@ async function getDb() {
 
     pool = new Pool({
         connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false },
-        // Fix SSL warning
-        sslmode: 'verify-full'
+        ssl: {
+            rejectUnauthorized: false
+        }
     });
 
     await pool.query(`
@@ -56,27 +56,23 @@ async function getDb() {
 async function useDbAuthState() {
     const db = await getDb();
     
-    // Get or create auth state
     let result = await db.query(
         `SELECT creds, keys FROM auth_state WHERE id = 'whatsapp_auth'`
     );
     
-    let creds = null;
-    let keys = null;
+    let creds = {};
+    let keys = {};
     
     if (result.rows.length > 0) {
-        creds = result.rows[0].creds;
-        keys = result.rows[0].keys;
+        creds = result.rows[0].creds || {};
+        keys = result.rows[0].keys || {};
         console.log('✅ Loaded auth from database');
     } else {
         console.log('📝 No existing auth found, will create new');
-        creds = {};
-        keys = {};
     }
     
     const saveCreds = async () => {
         try {
-            // Get current state from socket
             const currentCreds = sock?.authState?.creds || {};
             const currentKeys = sock?.authState?.keys || {};
             
@@ -97,15 +93,18 @@ async function useDbAuthState() {
     
     return {
         state: {
-            creds: creds || {},
-            keys: keys || {}
+            creds: creds,
+            keys: keys
         },
         saveCreds
     };
 }
 
-// Load Baileys dynamically
-let makeWASocket, DisconnectReason, Browsers;
+// Load Baileys correctly
+let makeWASocket = null;
+let DisconnectReason = null;
+let useMultiFileAuthState = null;
+let Browsers = null;
 let baileysLoaded = false;
 
 async function loadBaileys() {
@@ -113,11 +112,14 @@ async function loadBaileys() {
     
     try {
         const baileys = await import('@whiskeysockets/baileys');
+        // Fix: Get the default export correctly
         makeWASocket = baileys.default || baileys.makeWASocket;
         DisconnectReason = baileys.DisconnectReason;
+        useMultiFileAuthState = baileys.useMultiFileAuthState;
         Browsers = baileys.Browsers;
         baileysLoaded = true;
         console.log('✅ Baileys loaded successfully');
+        console.log('🔍 makeWASocket type:', typeof makeWASocket);
     } catch (error) {
         console.error('❌ Failed to load Baileys:', error);
         throw error;
@@ -129,6 +131,10 @@ async function connectWhatsApp() {
     try {
         await loadBaileys();
         
+        if (!makeWASocket) {
+            throw new Error('makeWASocket is not loaded');
+        }
+        
         console.log('🔄 Connecting to WhatsApp...');
         
         const { state, saveCreds } = await useDbAuthState();
@@ -139,17 +145,14 @@ async function connectWhatsApp() {
             keepAliveIntervalMs: 30000,
             defaultQueryTimeoutMs: 120000,
             printQRInTerminal: true,
-            browser: Browsers?.macOS('Desktop') || ['Chrome', 'Desktop', '1.0.0']
+            browser: ['Chrome', 'Desktop', '1.0.0']
         });
 
-        // Save creds when updated
         sock.ev.on('creds.update', saveCreds);
 
-        // Handle connection updates
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             
-            // Handle QR code
             if (qr) {
                 currentQR = qr;
                 console.log('📱 QR Code generated');
@@ -166,12 +169,12 @@ async function connectWhatsApp() {
                             updated_at = CURRENT_TIMESTAMP`,
                         [qrDataURL]
                     );
+                    console.log('✅ QR Code stored in database');
                 } catch (err) {
                     console.error('QR generation error:', err);
                 }
             }
             
-            // Handle connection status
             if (connection === 'close') {
                 const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason?.loggedOut;
                 isConnected = false;
@@ -207,7 +210,6 @@ async function connectWhatsApp() {
                         updated_at = CURRENT_TIMESTAMP`
                 );
 
-                // Process queued messages
                 if (messageQueue.length > 0) {
                     console.log(`📤 Sending ${messageQueue.length} queued messages...`);
                     for (const msg of messageQueue) {
@@ -223,7 +225,6 @@ async function connectWhatsApp() {
             }
         });
 
-        // Handle incoming messages
         sock.ev.on('messages.upsert', async ({ messages }) => {
             try {
                 const db = await getDb();

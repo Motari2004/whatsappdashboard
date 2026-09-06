@@ -1,6 +1,16 @@
 const { Pool } = require('pg');
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const QRCode = require('qrcode');
+
+// Use dynamic import for Baileys (ESM)
+let makeWASocket, useMultiFileAuthState, DisconnectReason;
+
+async function loadBaileys() {
+    const baileys = await import('@whiskeysockets/baileys');
+    makeWASocket = baileys.default;
+    useMultiFileAuthState = baileys.useMultiFileAuthState;
+    DisconnectReason = baileys.DisconnectReason;
+    console.log('✅ Baileys loaded successfully');
+}
 
 let pool = null;
 let sock = null;
@@ -8,6 +18,7 @@ let isConnected = false;
 let currentQR = null;
 let reconnectTimer = null;
 let messageQueue = [];
+let baileysLoaded = false;
 
 // ============ DATABASE ============
 async function getDb() {
@@ -46,6 +57,11 @@ async function getDb() {
 // ============ WHATSAPP CONNECTION ============
 async function connectWhatsApp() {
     try {
+        if (!baileysLoaded) {
+            await loadBaileys();
+            baileysLoaded = true;
+        }
+
         console.log('🔄 Connecting to WhatsApp...');
         
         const { state, saveCreds } = await useMultiFileAuthState('./auth_info');
@@ -71,7 +87,6 @@ async function connectWhatsApp() {
                 currentQR = qr;
                 console.log('📱 QR Code generated');
                 
-                // Generate QR as data URL for frontend
                 try {
                     const qrDataURL = await QRCode.toDataURL(qr);
                     const db = await getDb();
@@ -181,8 +196,15 @@ async function connectWhatsApp() {
     }
 }
 
-// Start connection
-connectWhatsApp();
+// Start connection after Baileys loads
+(async () => {
+    try {
+        await loadBaileys();
+        await connectWhatsApp();
+    } catch (error) {
+        console.error('Failed to initialize:', error);
+    }
+})();
 
 // ============ EXPRESS HANDLER ============
 module.exports = async (req, res) => {
@@ -298,7 +320,6 @@ module.exports = async (req, res) => {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
             
-            // Update status
             const statusText = isConnected ? 'connected' : 'disconnected';
             await db.query(
                 `INSERT INTO status (id, status, updated_at)

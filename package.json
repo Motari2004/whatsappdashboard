@@ -1,11 +1,10 @@
 {
   "name": "whatsapp-dashboard",
   "version": "1.0.0",
-  "description": "WhatsApp Dashboard with QR scanning in UI",
+  "description": "WhatsApp Dashboard with QR scanning",
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.6.0",
+    "@whiskeysockets/baileys": "5.3.0",
     "pg": "^8.11.3",
-    "qrcode": "^1.5.3",
-    "ws": "^8.14.2"
+    "qrcode": "^1.5.3"
   }
 }

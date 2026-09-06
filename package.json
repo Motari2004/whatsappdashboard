@@ -1,9 +1,16 @@
 {
-  "name": "whatsapp-dashboard-vercel",
+  "name": "whatsapp-vercel",
   "version": "1.0.0",
-  "description": "WhatsApp Dashboard with external cron",
+  "description": "WhatsApp Dashboard on Vercel with external cron",
+  "main": "api/whatsapp/poll.js",
   "dependencies": {
+    "@whiskeysockets/baileys": "^6.6.0",
     "pg": "^8.11.3",
-    "node-fetch": "^2.6.12"
+    "node-fetch": "^2.6.12",
+    "ws": "^8.14.2"
+  },
+  "scripts": {
+    "start": "vercel dev",
+    "deploy": "vercel deploy --prod"
   }
 }

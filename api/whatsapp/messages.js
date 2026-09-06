@@ -1,26 +1,25 @@
 const { connectToDatabase } = require('../_lib/database.js');
 
 module.exports = async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+
     try {
         const pool = await connectToDatabase();
         const limit = parseInt(req.query.limit) || 50;
-        const from = req.query.from;
         
-        // Build query
-        let query = `SELECT * FROM messages WHERE 1=1`;
-        const params = [];
-        let paramCount = 1;
-        
-        if (from) {
-            query += ` AND from_id = $${paramCount}`;
-            params.push(from);
-            paramCount++;
-        }
-        
-        query += ` ORDER BY timestamp DESC LIMIT $${paramCount}`;
-        params.push(limit);
-        
-        const result = await pool.query(query, params);
+        // Get messages
+        const result = await pool.query(
+            `SELECT * FROM messages 
+             ORDER BY timestamp DESC 
+             LIMIT $1`,
+            [limit]
+        );
         
         // Get unread count
         const unreadResult = await pool.query(

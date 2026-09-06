@@ -1,6 +1,15 @@
 const { connectToDatabase } = require('../_lib/database.js');
+const { isConnected } = require('./baileys.js');
 
 module.exports = async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+
     try {
         const pool = await connectToDatabase();
         
@@ -10,27 +19,11 @@ module.exports = async (req, res) => {
         );
         
         const status = result.rows[0] || { status: 'unknown' };
-        
-        // Also check Baileys health directly
-        let connected = false;
-        let user = null;
-        
-        try {
-            const baileysUrl = process.env.BAILEYS_URL;
-            if (baileysUrl) {
-                const healthResponse = await fetch(`${baileysUrl}/api/health`);
-                const healthData = await healthResponse.json();
-                connected = healthData.connected || false;
-                user = healthData.user || null;
-            }
-        } catch (error) {
-            console.error('Error checking Baileys health:', error.message);
-        }
+        const connected = isConnected();
         
         res.json({
             connected: connected,
             status: status.status || 'unknown',
-            user: user || status.user_id || null,
             lastConnected: status.last_connected || null,
             lastDisconnect: status.last_disconnect || null,
             timestamp: new Date().toISOString()

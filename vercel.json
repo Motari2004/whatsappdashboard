@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "functions": {
+    "api/whatsapp/*.js": {
+      "maxDuration": 10,
+      "memory": 1024
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/whatsapp/poll",
+      "schedule": "*/30 * * * *"
+    }
+  ]
+}

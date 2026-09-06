@@ -2,43 +2,47 @@
 <html>
 <head>
     <title>WhatsApp Dashboard</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; background: #f0f2f5; padding: 20px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; padding: 20px; }
         .container { max-width: 900px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden; }
         .header { background: #075e54; color: white; padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
         .header h1 { font-size: 20px; }
-        .status { font-size: 13px; padding: 4px 12px; border-radius: 20px; background: rgba(255,255,255,0.2); }
+        .status { padding: 4px 12px; border-radius: 20px; font-size: 13px; }
         .status.connected { background: #4CAF50; }
         .status.disconnected { background: #f44336; }
-        .status.error { background: #ff9800; }
-        .messages { padding: 20px; max-height: 500px; overflow-y: auto; background: #e5ddd5; min-height: 300px; }
+        .status.connecting { background: #ff9800; }
+        .status.qr_required { background: #2196F3; }
+        .messages { padding: 20px; max-height: 400px; overflow-y: auto; background: #e5ddd5; min-height: 200px; }
         .message { margin-bottom: 15px; display: flex; flex-direction: column; animation: fadeIn 0.3s; }
         .message.sent { align-items: flex-end; }
         .message.received { align-items: flex-start; }
         .message-content { background: white; padding: 10px 15px; border-radius: 8px; max-width: 70%; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
         .message.sent .message-content { background: #dcf8c6; }
         .message-time { font-size: 11px; color: #999; margin-top: 4px; }
-        .message-sender { font-size: 11px; color: #075e54; font-weight: 500; margin-bottom: 2px; }
         .send-area { padding: 20px; background: white; border-top: 1px solid #e0e0e0; display: flex; gap: 10px; flex-wrap: wrap; }
         .send-area input { flex: 1; min-width: 200px; padding: 10px 15px; border: 1px solid #ddd; border-radius: 25px; font-size: 14px; outline: none; }
         .send-area input:focus { border-color: #075e54; }
-        .send-area button { padding: 10px 25px; background: #075e54; color: white; border: none; border-radius: 25px; cursor: pointer; font-weight: 500; white-space: nowrap; }
+        .send-area button { padding: 10px 25px; background: #075e54; color: white; border: none; border-radius: 25px; cursor: pointer; font-weight: 500; }
         .send-area button:hover:not(:disabled) { background: #064a42; }
         .send-area button:disabled { background: #999; cursor: not-allowed; }
         .loading { text-align: center; padding: 20px; color: #666; }
         .info-bar { padding: 10px 20px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; font-size: 13px; color: #666; flex-wrap: wrap; gap: 5px; }
         .unread-badge { background: #f44336; color: white; border-radius: 50%; padding: 2px 8px; font-size: 12px; margin-left: 8px; }
+        .qr-container { text-align: center; padding: 30px; background: white; border-bottom: 1px solid #e0e0e0; }
+        .qr-container img { max-width: 250px; border: 2px solid #ddd; border-radius: 8px; }
+        .qr-container h3 { margin-bottom: 10px; color: #075e54; }
+        .qr-container p { color: #666; font-size: 14px; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #f1f1f1; }
-        ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .scanning { animation: pulse 2s infinite; }
         @media (max-width: 600px) {
             .header { padding: 15px; }
             .header h1 { font-size: 16px; }
-            .send-area { padding: 15px; }
+            .send-area { padding: 15px; flex-direction: column; }
             .send-area input { min-width: 150px; }
-            .message-content { max-width: 85%; }
         }
     </style>
 </head>
@@ -47,22 +51,242 @@
         <div class="header">
             <h1>📱 WhatsApp Dashboard</h1>
             <div>
-                <span class="status" id="status">Checking...</span>
+                <span class="status connecting" id="status">Initializing...</span>
                 <span id="unreadBadge" class="unread-badge" style="display:none;">0</span>
             </div>
         </div>
+        
+        <!-- QR Code Section -->
+        <div id="qrContainer" class="qr-container" style="display:none;">
+            <h3>📲 Scan QR Code</h3>
+            <div id="qrImage"></div>
+            <p>Open WhatsApp on your phone → Settings → Linked Devices → Link a Device</p>
+            <p style="margin-top:10px;font-size:12px;color:#999;">QR code refreshes automatically</p>
+        </div>
+
         <div class="info-bar">
             <span id="messageCount">Loading...</span>
             <span id="lastUpdate">Last update: --</span>
         </div>
+        
         <div class="messages" id="messages">
             <div class="loading">📭 Loading messages...</div>
         </div>
+        
         <div class="send-area">
             <input type="text" id="messageInput" placeholder="Type a message..." disabled>
             <button id="sendButton" disabled>Send</button>
         </div>
     </div>
-    <script src="script.js"></script>
+
+    <script>
+        // ============ CONFIGURATION ============
+        const POLL_INTERVAL = 3000;
+        const STATUS_INTERVAL = 3000;
+
+        // ============ DOM ELEMENTS ============
+        const messagesContainer = document.getElementById('messages');
+        const statusElement = document.getElementById('status');
+        const unreadBadge = document.getElementById('unreadBadge');
+        const messageCount = document.getElementById('messageCount');
+        const lastUpdate = document.getElementById('lastUpdate');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const qrContainer = document.getElementById('qrContainer');
+        const qrImage = document.getElementById('qrImage');
+
+        let selectedContact = null;
+        let previousQR = null;
+
+        // ============ FETCH MESSAGES ============
+        async function fetchMessages() {
+            try {
+                const response = await fetch('/api/messages?limit=100');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const messages = data.messages || [];
+                    renderMessages(messages);
+                    
+                    messageCount.textContent = `📊 ${messages.length} messages`;
+                    lastUpdate.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+                    
+                    if (data.unread > 0) {
+                        unreadBadge.style.display = 'inline';
+                        unreadBadge.textContent = data.unread;
+                    } else {
+                        unreadBadge.style.display = 'none';
+                    }
+                    
+                    if (messages.length > 0) {
+                        const first = messages[0]?.from_id;
+                        if (first && first !== 'me' && !selectedContact) {
+                            selectedContact = first;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching messages:', error);
+            }
+        }
+
+        // ============ RENDER MESSAGES ============
+        function renderMessages(messages) {
+            if (!messages || messages.length === 0) {
+                messagesContainer.innerHTML = `
+                    <div style="text-align:center;color:#666;padding:40px 20px;">
+                        <div style="font-size:48px;margin-bottom:10px;">📭</div>
+                        <div>No messages yet</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            const recent = messages.slice(0, 50);
+            const html = recent.map(msg => {
+                const isSent = msg.from_me || msg.from_id === 'me';
+                const sender = isSent ? 'You' : (msg.from_id?.split('@')[0] || 'Unknown');
+                return `
+                    <div class="message ${isSent ? 'sent' : 'received'}">
+                        <div class="message-content">
+                            ${!isSent ? `<div style="font-size:11px;color:#075e54;font-weight:500;margin-bottom:4px;">${sender}</div>` : ''}
+                            ${msg.body || '[Media/File]'}
+                            <div class="message-time">
+                                ${new Date(msg.timestamp * 1000).toLocaleString()}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            messagesContainer.innerHTML = html;
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // ============ FETCH STATUS ============
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                // Update status
+                const statusMap = {
+                    'connected': { text: '✅ Connected', class: 'connected' },
+                    'disconnected': { text: '❌ Disconnected', class: 'disconnected' },
+                    'qr_required': { text: '📱 Scan QR', class: 'qr_required' },
+                    'connecting': { text: '🔄 Connecting...', class: 'connecting' }
+                };
+                
+                const statusInfo = statusMap[data.status] || statusMap['connecting'];
+                statusElement.textContent = statusInfo.text;
+                statusElement.className = `status ${statusInfo.class}`;
+                
+                // Handle QR Code
+                if (data.qrCode && data.status === 'qr_required') {
+                    qrContainer.style.display = 'block';
+                    qrImage.innerHTML = `<img src="${data.qrCode}" alt="QR Code" class="scanning">`;
+                    previousQR = data.qrCode;
+                } else {
+                    qrContainer.style.display = 'none';
+                }
+                
+                // Enable/disable send
+                if (data.connected) {
+                    messageInput.disabled = false;
+                    sendButton.disabled = false;
+                    messageInput.placeholder = 'Type a message...';
+                } else {
+                    messageInput.disabled = true;
+                    sendButton.disabled = true;
+                    messageInput.placeholder = data.status === 'qr_required' ? 'Scan QR code first...' : 'Connecting...';
+                }
+                
+            } catch (error) {
+                console.error('Error fetching status:', error);
+                statusElement.textContent = '⚠️ Error';
+                statusElement.className = 'status disconnected';
+            }
+        }
+
+        // ============ SEND MESSAGE ============
+        async function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text) return;
+            
+            if (!selectedContact) {
+                const response = await fetch('/api/messages?limit=5');
+                const data = await response.json();
+                const contact = data.messages?.find(m => m.from_id && m.from_id !== 'me');
+                if (contact) {
+                    selectedContact = contact.from_id;
+                } else {
+                    alert('No contact available. Wait for an incoming message first.');
+                    return;
+                }
+            }
+            
+            try {
+                const response = await fetch('/api/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        to: selectedContact, 
+                        message: text 
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    messageInput.value = '';
+                    setTimeout(fetchMessages, 500);
+                } else {
+                    alert('Failed to send: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error sending:', error);
+                alert('Failed to send message');
+            }
+        }
+
+        // ============ TEST API ============
+        async function testApi() {
+            try {
+                const response = await fetch('/api/test');
+                const data = await response.json();
+                console.log('✅ API Test:', data);
+                return data;
+            } catch (error) {
+                console.error('❌ API Test failed:', error);
+                return null;
+            }
+        }
+
+        // ============ INITIALIZE ============
+        async function init() {
+            console.log('🚀 Starting WhatsApp Dashboard...');
+            
+            const test = await testApi();
+            if (!test) {
+                console.error('❌ API not responding. Check deployment.');
+                return;
+            }
+            
+            await fetchStatus();
+            await fetchMessages();
+            
+            setInterval(fetchMessages, POLL_INTERVAL);
+            setInterval(fetchStatus, STATUS_INTERVAL);
+            
+            messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') sendMessage();
+            });
+            sendButton.addEventListener('click', sendMessage);
+            
+            console.log('✅ Dashboard initialized!');
+        }
+
+        init();
+    </script>
 </body>
 </html>

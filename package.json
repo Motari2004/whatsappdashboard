@@ -1,16 +1,11 @@
 {
-  "name": "whatsapp-vercel",
+  "name": "whatsapp-dashboard",
   "version": "1.0.0",
-  "description": "WhatsApp Dashboard on Vercel with external cron",
-  "main": "api/whatsapp/poll.js",
+  "description": "WhatsApp Dashboard with QR scanning in UI",
   "dependencies": {
     "@whiskeysockets/baileys": "^6.6.0",
     "pg": "^8.11.3",
-    "node-fetch": "^2.6.12",
+    "qrcode": "^1.5.3",
     "ws": "^8.14.2"
-  },
-  "scripts": {
-    "start": "vercel dev",
-    "deploy": "vercel deploy --prod"
   }
 }

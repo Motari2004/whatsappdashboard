@@ -1,10 +1,9 @@
 {
-  "name": "whatsapp-dashboard",
+  "name": "whatsapp-greenapi-dashboard",
   "version": "1.0.0",
-  "description": "WhatsApp Dashboard with QR scanning",
+  "description": "WhatsApp Dashboard with Green API",
   "dependencies": {
-    "@whiskeysockets/baileys": "6.6.0",
     "pg": "^8.11.3",
-    "qrcode": "^1.5.3"
+    "node-fetch": "^2.7.0"
   }
 }

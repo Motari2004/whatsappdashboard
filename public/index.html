@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WhatsApp Dashboard</title>
+    <title>WhatsApp Dashboard - Green API</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
@@ -10,6 +10,7 @@
         .container { max-width: 900px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden; }
         .header { background: #075e54; color: white; padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
         .header h1 { font-size: 20px; }
+        .header h1 small { font-size: 12px; font-weight: normal; opacity: 0.8; }
         .status { padding: 4px 12px; border-radius: 20px; font-size: 13px; }
         .status.connected { background: #4CAF50; }
         .status.disconnected { background: #f44336; }
@@ -22,6 +23,7 @@
         .message-content { background: white; padding: 10px 15px; border-radius: 8px; max-width: 70%; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
         .message.sent .message-content { background: #dcf8c6; }
         .message-time { font-size: 11px; color: #999; margin-top: 4px; }
+        .message-sender { font-size: 11px; color: #075e54; font-weight: 500; margin-bottom: 2px; }
         .send-area { padding: 20px; background: white; border-top: 1px solid #e0e0e0; display: flex; gap: 10px; flex-wrap: wrap; }
         .send-area input { flex: 1; min-width: 200px; padding: 10px 15px; border: 1px solid #ddd; border-radius: 25px; font-size: 14px; outline: none; }
         .send-area input:focus { border-color: #075e54; }
@@ -35,6 +37,8 @@
         .qr-container img { max-width: 250px; border: 2px solid #ddd; border-radius: 8px; }
         .qr-container h3 { margin-bottom: 10px; color: #075e54; }
         .qr-container p { color: #666; font-size: 14px; }
+        .init-btn { background: #075e54; color: white; border: none; padding: 8px 20px; border-radius: 20px; cursor: pointer; font-size: 13px; }
+        .init-btn:hover { background: #064a42; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         .scanning { animation: pulse 2s infinite; }
@@ -49,10 +53,11 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>📱 WhatsApp Dashboard</h1>
+            <h1>📱 WhatsApp Dashboard <small>Green API</small></h1>
             <div>
-                <span class="status connecting" id="status">Initializing...</span>
+                <span class="status connecting" id="status">Loading...</span>
                 <span id="unreadBadge" class="unread-badge" style="display:none;">0</span>
+                <button class="init-btn" id="initBtn" style="display:none;">🔗 Connect</button>
             </div>
         </div>
         
@@ -60,12 +65,17 @@
         <div id="qrContainer" class="qr-container" style="display:none;">
             <h3>📲 Scan QR Code</h3>
             <div id="qrImage"></div>
-            <p>Open WhatsApp on your phone → Settings → Linked Devices → Link a Device</p>
-            <p style="margin-top:10px;font-size:12px;color:#999;">QR code refreshes automatically</p>
+            <p style="margin-top:10px;">
+                Open WhatsApp → Settings → Linked Devices → Link a Device
+                <br>
+                <small style="color:#999;">Scan the QR code with your phone</small>
+            </p>
+            <button class="init-btn" onclick="initConnection()" style="margin-top:10px;">🔄 Refresh QR</button>
         </div>
 
         <div class="info-bar">
             <span id="messageCount">Loading...</span>
+            <span id="instanceInfo">Instance: --</span>
             <span id="lastUpdate">Last update: --</span>
         </div>
         
@@ -82,21 +92,71 @@
     <script>
         // ============ CONFIGURATION ============
         const POLL_INTERVAL = 3000;
-        const STATUS_INTERVAL = 3000;
+        const STATUS_INTERVAL = 5000;
 
         // ============ DOM ELEMENTS ============
         const messagesContainer = document.getElementById('messages');
         const statusElement = document.getElementById('status');
         const unreadBadge = document.getElementById('unreadBadge');
         const messageCount = document.getElementById('messageCount');
+        const instanceInfo = document.getElementById('instanceInfo');
         const lastUpdate = document.getElementById('lastUpdate');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
         const qrContainer = document.getElementById('qrContainer');
         const qrImage = document.getElementById('qrImage');
+        const initBtn = document.getElementById('initBtn');
 
         let selectedContact = null;
         let previousQR = null;
+
+        // ============ INITIALIZE CONNECTION ============
+        async function initConnection() {
+            console.log('🔄 Initializing connection...');
+            statusElement.textContent = '🔄 Connecting...';
+            statusElement.className = 'status connecting';
+            
+            try {
+                const response = await fetch('/api/init');
+                const data = await response.json();
+                
+                if (data.success) {
+                    if (data.status === 'qr_required' && data.qrCode) {
+                        showQR(data.qrCode);
+                        statusElement.textContent = '📱 Scan QR';
+                        statusElement.className = 'status qr_required';
+                    } else {
+                        statusElement.textContent = '✅ Connected';
+                        statusElement.className = 'status connected';
+                        qrContainer.style.display = 'none';
+                    }
+                } else {
+                    console.error('Init failed:', data.error);
+                    statusElement.textContent = '❌ Error';
+                    statusElement.className = 'status disconnected';
+                }
+            } catch (error) {
+                console.error('Init error:', error);
+                statusElement.textContent = '❌ Error';
+                statusElement.className = 'status disconnected';
+            }
+        }
+
+        // ============ SHOW QR CODE ============
+        function showQR(qrData) {
+            qrContainer.style.display = 'block';
+            // If it's already a data URL, use directly
+            if (qrData.startsWith('data:image')) {
+                qrImage.innerHTML = `<img src="${qrData}" alt="QR Code" class="scanning">`;
+            } else {
+                // Try to convert to image using QRServer
+                qrImage.innerHTML = `
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrData)}" 
+                         alt="QR Code" class="scanning">
+                `;
+            }
+            previousQR = qrData;
+        }
 
         // ============ FETCH MESSAGES ============
         async function fetchMessages() {
@@ -130,6 +190,20 @@
             }
         }
 
+        // ============ FETCH CONTACTS ============
+        async function fetchContacts() {
+            try {
+                const response = await fetch('/api/contacts');
+                const data = await response.json();
+                if (data.success && data.contacts.length > 0) {
+                    // Update contact list for UI
+                    console.log(`📇 ${data.contacts.length} contacts loaded`);
+                }
+            } catch (error) {
+                console.error('Error fetching contacts:', error);
+            }
+        }
+
         // ============ RENDER MESSAGES ============
         function renderMessages(messages) {
             if (!messages || messages.length === 0) {
@@ -137,6 +211,9 @@
                     <div style="text-align:center;color:#666;padding:40px 20px;">
                         <div style="font-size:48px;margin-bottom:10px;">📭</div>
                         <div>No messages yet</div>
+                        <div style="font-size:13px;margin-top:5px;color:#999;">
+                            Send a message or wait for incoming ones
+                        </div>
                     </div>
                 `;
                 return;
@@ -145,11 +222,11 @@
             const recent = messages.slice(0, 50);
             const html = recent.map(msg => {
                 const isSent = msg.from_me || msg.from_id === 'me';
-                const sender = isSent ? 'You' : (msg.from_id?.split('@')[0] || 'Unknown');
+                const sender = isSent ? 'You' : (msg.from_id?.replace('@c.us', '') || 'Unknown');
                 return `
                     <div class="message ${isSent ? 'sent' : 'received'}">
                         <div class="message-content">
-                            ${!isSent ? `<div style="font-size:11px;color:#075e54;font-weight:500;margin-bottom:4px;">${sender}</div>` : ''}
+                            ${!isSent ? `<div class="message-sender">${sender}</div>` : ''}
                             ${msg.body || '[Media/File]'}
                             <div class="message-time">
                                 ${new Date(msg.timestamp * 1000).toLocaleString()}
@@ -169,36 +246,37 @@
                 const response = await fetch('/api/status');
                 const data = await response.json();
                 
-                // Update status
-                const statusMap = {
-                    'connected': { text: '✅ Connected', class: 'connected' },
-                    'disconnected': { text: '❌ Disconnected', class: 'disconnected' },
-                    'qr_required': { text: '📱 Scan QR', class: 'qr_required' },
-                    'connecting': { text: '🔄 Connecting...', class: 'connecting' }
-                };
+                // Update instance info
+                instanceInfo.textContent = `Instance: ${data.greenStatus || data.status || 'unknown'}`;
                 
-                const statusInfo = statusMap[data.status] || statusMap['connecting'];
-                statusElement.textContent = statusInfo.text;
-                statusElement.className = `status ${statusInfo.class}`;
-                
-                // Handle QR Code
-                if (data.qrCode && data.status === 'qr_required') {
-                    qrContainer.style.display = 'block';
-                    qrImage.innerHTML = `<img src="${data.qrCode}" alt="QR Code" class="scanning">`;
-                    previousQR = data.qrCode;
+                // Show/hide connect button
+                if (!data.connected && data.status !== 'qr_required') {
+                    initBtn.style.display = 'inline-block';
                 } else {
-                    qrContainer.style.display = 'none';
+                    initBtn.style.display = 'none';
                 }
                 
-                // Enable/disable send
-                if (data.connected) {
+                // Update status
+                if (data.connected || data.greenStatus === 'online') {
+                    statusElement.textContent = '✅ Connected';
+                    statusElement.className = 'status connected';
+                    qrContainer.style.display = 'none';
                     messageInput.disabled = false;
                     sendButton.disabled = false;
                     messageInput.placeholder = 'Type a message...';
-                } else {
+                } else if (data.status === 'qr_required' && data.qrCode) {
+                    statusElement.textContent = '📱 Scan QR';
+                    statusElement.className = 'status qr_required';
+                    showQR(data.qrCode);
                     messageInput.disabled = true;
                     sendButton.disabled = true;
-                    messageInput.placeholder = data.status === 'qr_required' ? 'Scan QR code first...' : 'Connecting...';
+                    messageInput.placeholder = 'Scan QR code first...';
+                } else {
+                    statusElement.textContent = '❌ Disconnected';
+                    statusElement.className = 'status disconnected';
+                    messageInput.disabled = true;
+                    sendButton.disabled = true;
+                    messageInput.placeholder = 'Click "Connect" to start...';
                 }
                 
             } catch (error) {
@@ -264,7 +342,7 @@
 
         // ============ INITIALIZE ============
         async function init() {
-            console.log('🚀 Starting WhatsApp Dashboard...');
+            console.log('🚀 Starting WhatsApp Dashboard with Green API...');
             
             const test = await testApi();
             if (!test) {
@@ -274,16 +352,23 @@
             
             await fetchStatus();
             await fetchMessages();
+            await fetchContacts();
+            
+            // Auto-init connection
+            await initConnection();
             
             setInterval(fetchMessages, POLL_INTERVAL);
             setInterval(fetchStatus, STATUS_INTERVAL);
+            setInterval(fetchContacts, 30000);
             
             messageInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') sendMessage();
             });
             sendButton.addEventListener('click', sendMessage);
+            initBtn.addEventListener('click', initConnection);
             
             console.log('✅ Dashboard initialized!');
+            console.log(`📊 Polling every ${POLL_INTERVAL/1000} seconds`);
         }
 
         init();

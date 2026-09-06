@@ -1,29 +1,14 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/**/*.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "frontend/**",
-      "use": "@vercel/static"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/frontend/$1"
-    }
-  ],
-  "functions": {
-    "api/whatsapp/*.js": {
-      "maxDuration": 10,
-      "memory": 1024
-    }
+  "name": "whatsapp-dashboard-vercel",
+  "version": "1.0.0",
+  "description": "WhatsApp Dashboard with external cron",
+  "main": "api/whatsapp/poll.js",
+  "dependencies": {
+    "pg": "^8.11.3",
+    "node-fetch": "^2.6.12"
+  },
+  "scripts": {
+    "start": "vercel dev",
+    "deploy": "vercel deploy --prod"
   }
 }

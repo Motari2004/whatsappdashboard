@@ -5,11 +5,19 @@ module.exports = async (req, res) => {
         const { to, message } = req.body;
         
         if (!to || !message) {
-            return res.status(400).json({ error: 'Missing required fields: to, message' });
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Missing required fields: to, message' 
+            });
         }
 
         // Forward to Baileys service
-        const response = await fetch(`${process.env.BAILEYS_URL}/api/send`, {
+        const baileysUrl = process.env.BAILEYS_URL;
+        if (!baileysUrl) {
+            throw new Error('BAILEYS_URL environment variable is not set');
+        }
+
+        const response = await fetch(`${baileysUrl}/api/send`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ to, message })
@@ -37,8 +45,12 @@ module.exports = async (req, res) => {
         }
         
         res.json(data);
+        
     } catch (error) {
         console.error('Error sending message:', error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
     }
 };

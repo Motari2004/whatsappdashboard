@@ -41,14 +41,11 @@ export async function connectToDatabase() {
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
-        CREATE TABLE IF NOT EXISTS contacts (
-            id VARCHAR(255) PRIMARY KEY,
-            name VARCHAR(255),
-            number VARCHAR(50),
-            is_group BOOLEAN DEFAULT false,
-            last_message TIMESTAMP,
-            unread_count INTEGER DEFAULT 0,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        CREATE TABLE IF NOT EXISTS processed_log (
+            id SERIAL PRIMARY KEY,
+            cron_job_id VARCHAR(100),
+            messages_found INTEGER DEFAULT 0,
+            processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC);

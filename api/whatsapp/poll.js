@@ -1,77 +1,125 @@
 const { connectToDatabase } = require('../_lib/database.js');
 
 module.exports = async (req, res) => {
+    // Security: Verify cron secret
+    const authHeader = req.headers.authorization;
+    const cronSecret = process.env.CRON_SECRET || 'your-secret-key';
+    
+    if (authHeader !== `Bearer ${cronSecret}` && process.env.NODE_ENV === 'production') {
+        return res.status(401).json({ 
+            error: 'Unauthorized', 
+            message: 'Invalid cron secret' 
+        });
+    }
+
+    // Prevent duplicate runs (optional)
+    const runId = req.query.runId || Date.now().toString();
+    
     try {
-        // Verify cron secret
-        const authHeader = req.headers.authorization;
-        if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && process.env.NODE_ENV === 'production') {
-            return res.status(401).json({ error: 'Unauthorized' });
+        const pool = await connectToDatabase();
+        const now = new Date().toISOString();
+        
+        console.log(`🔄 Cron job started: ${runId} at ${now}`);
+
+        // 1. FETCH NEW MESSAGES FROM BAILEYS SERVICE
+        const baileysUrl = process.env.BAILEYS_URL;
+        if (!baileysUrl) {
+            throw new Error('BAILEYS_URL environment variable is not set');
         }
 
-        const pool = await connectToDatabase();
+        const response = await fetch(`${baileysUrl}/api/messages`, {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
         
-        // 1. FETCH NEW MESSAGES FROM BAILEYS SERVICE
-        const response = await fetch(`${process.env.BAILEYS_URL}/api/messages`);
+        if (!response.ok) {
+            throw new Error(`Baileys service returned ${response.status}`);
+        }
+        
         const data = await response.json();
-        
         let newMessagesCount = 0;
 
+        // 2. STORE NEW MESSAGES IN POSTGRESQL
         if (data.messages && data.messages.length > 0) {
-            // 2. STORE IN POSTGRESQL
+            console.log(`📩 Found ${data.messages.length} new messages from Baileys`);
+            
             for (const msg of data.messages) {
-                const result = await pool.query(
-                    `INSERT INTO messages (
-                        id, from_id, to_id, from_me, body, timestamp, type, has_media
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    ON CONFLICT (id) DO UPDATE SET
-                        body = EXCLUDED.body,
-                        processed = false
-                    RETURNING id`,
-                    [
-                        msg.id,
-                        msg.from || msg.from_id,
-                        msg.to || msg.to_id,
-                        msg.fromMe || false,
-                        msg.body || '[Media]',
-                        msg.timestamp || Math.floor(Date.now() / 1000),
-                        msg.type || 'text',
-                        msg.hasMedia || false
-                    ]
-                );
-                
-                if (result.rowCount > 0) {
-                    newMessagesCount++;
+                try {
+                    const result = await pool.query(
+                        `INSERT INTO messages (
+                            id, from_id, to_id, from_me, body, timestamp, type, has_media
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        ON CONFLICT (id) DO UPDATE SET
+                            body = EXCLUDED.body,
+                            processed = false
+                        RETURNING id`,
+                        [
+                            msg.id || `msg_${Date.now()}_${Math.random()}`,
+                            msg.from || msg.from_id || 'unknown',
+                            msg.to || msg.to_id || null,
+                            msg.fromMe || false,
+                            msg.body || '[Media/File]',
+                            msg.timestamp || Math.floor(Date.now() / 1000),
+                            msg.type || 'text',
+                            msg.hasMedia || false
+                        ]
+                    );
+                    
+                    if (result.rowCount > 0) {
+                        newMessagesCount++;
+                    }
+                } catch (error) {
+                    console.error(`Error storing message ${msg.id}:`, error.message);
                 }
             }
 
-            console.log(`📩 Stored ${newMessagesCount} new messages`);
+            console.log(`✅ Stored ${newMessagesCount} new messages`);
         }
 
-        // 3. CHECK CONNECTION STATUS
-        const statusResult = await pool.query(
-            `SELECT * FROM status WHERE id = 'whatsapp_status'`
-        );
-        
-        let status = statusResult.rows[0];
-
-        // 4. TRIGGER RECONNECT IF NEEDED
-        if (status?.status === 'disconnected' && process.env.BAILEYS_URL) {
-            try {
-                await fetch(`${process.env.BAILEYS_URL}/api/health`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ triggerReconnect: true })
-                });
-                console.log('✅ Reconnect triggered');
-                
+        // 3. CHECK BAILEYS CONNECTION STATUS
+        try {
+            const healthResponse = await fetch(`${baileysUrl}/api/health`);
+            const healthData = await healthResponse.json();
+            
+            if (healthData.connected) {
                 await pool.query(
-                    `UPDATE status SET status = 'reconnecting', updated_at = CURRENT_TIMESTAMP 
+                    `INSERT INTO status (id, status, last_connected, user_id, updated_at)
+                     VALUES ('whatsapp_status', 'connected', CURRENT_TIMESTAMP, $1, CURRENT_TIMESTAMP)
+                     ON CONFLICT (id) DO UPDATE SET
+                        status = 'connected',
+                        last_connected = CURRENT_TIMESTAMP,
+                        user_id = EXCLUDED.user_id,
+                        updated_at = CURRENT_TIMESTAMP`,
+                    [healthData.user || null]
+                );
+                console.log('✅ WhatsApp is connected');
+            } else {
+                await pool.query(
+                    `UPDATE status 
+                     SET status = 'disconnected', 
+                         last_disconnect = CURRENT_TIMESTAMP,
+                         updated_at = CURRENT_TIMESTAMP
                      WHERE id = 'whatsapp_status'`
                 );
-            } catch (error) {
-                console.error('Failed to trigger reconnect:', error);
+                console.log('❌ WhatsApp is disconnected');
             }
+        } catch (error) {
+            console.error('Error checking health:', error.message);
+            await pool.query(
+                `UPDATE status 
+                 SET status = 'error', 
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = 'whatsapp_status'`
+            );
         }
+
+        // 4. LOG THIS CRON RUN
+        await pool.query(
+            `INSERT INTO processed_log (cron_job_id, messages_found)
+             VALUES ($1, $2)`,
+            [runId, newMessagesCount]
+        );
 
         // 5. CLEANUP OLD MESSAGES (keep last 30 days)
         const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
@@ -86,19 +134,36 @@ module.exports = async (req, res) => {
             console.log(`🧹 Cleaned up ${deleteResult.rowCount} old messages`);
         }
 
+        // Return success response
         res.json({
             success: true,
-            newMessagesCount,
-            status: status || { status: 'unknown' },
-            timestamp: new Date().toISOString(),
-            cleanup: deleteResult.rowCount || 0
+            runId: runId,
+            timestamp: now,
+            newMessagesCount: newMessagesCount,
+            totalMessages: data.messages?.length || 0,
+            cleanedUp: deleteResult.rowCount || 0,
+            status: 'completed'
         });
 
     } catch (error) {
-        console.error('Polling error:', error);
+        console.error('❌ Polling error:', error);
+        
+        // Log error
+        try {
+            const pool = await connectToDatabase();
+            await pool.query(
+                `INSERT INTO processed_log (cron_job_id, messages_found, processed_at)
+                 VALUES ($1, $2, CURRENT_TIMESTAMP)`,
+                [runId, -1] // -1 indicates error
+            );
+        } catch (dbError) {
+            console.error('Failed to log error:', dbError);
+        }
+        
         res.status(500).json({ 
             success: false, 
-            error: error.message 
+            error: error.message,
+            runId: runId
         });
     }
 };

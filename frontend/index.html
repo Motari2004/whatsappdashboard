@@ -6,33 +6,40 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; background: #f0f2f5; padding: 20px; }
         .container { max-width: 900px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden; }
-        .header { background: #075e54; color: white; padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; }
-        .status { font-size: 14px; padding: 4px 12px; border-radius: 20px; background: rgba(255,255,255,0.2); }
+        .header { background: #075e54; color: white; padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        .header h1 { font-size: 20px; }
+        .status { font-size: 13px; padding: 4px 12px; border-radius: 20px; background: rgba(255,255,255,0.2); }
         .status.connected { background: #4CAF50; }
         .status.disconnected { background: #f44336; }
-        .status.reconnecting { background: #ff9800; }
-        .messages { padding: 20px; max-height: 500px; overflow-y: auto; background: #e5ddd5; }
-        .message { margin-bottom: 15px; display: flex; flex-direction: column; }
+        .status.error { background: #ff9800; }
+        .messages { padding: 20px; max-height: 500px; overflow-y: auto; background: #e5ddd5; min-height: 300px; }
+        .message { margin-bottom: 15px; display: flex; flex-direction: column; animation: fadeIn 0.3s; }
         .message.sent { align-items: flex-end; }
         .message.received { align-items: flex-start; }
         .message-content { background: white; padding: 10px 15px; border-radius: 8px; max-width: 70%; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
         .message.sent .message-content { background: #dcf8c6; }
         .message-time { font-size: 11px; color: #999; margin-top: 4px; }
         .message-sender { font-size: 11px; color: #075e54; font-weight: 500; margin-bottom: 2px; }
-        .send-area { padding: 20px; background: white; border-top: 1px solid #e0e0e0; display: flex; gap: 10px; }
-        .send-area input { flex: 1; padding: 10px 15px; border: 1px solid #ddd; border-radius: 25px; font-size: 14px; outline: none; }
+        .send-area { padding: 20px; background: white; border-top: 1px solid #e0e0e0; display: flex; gap: 10px; flex-wrap: wrap; }
+        .send-area input { flex: 1; min-width: 200px; padding: 10px 15px; border: 1px solid #ddd; border-radius: 25px; font-size: 14px; outline: none; }
         .send-area input:focus { border-color: #075e54; }
-        .send-area button { padding: 10px 25px; background: #075e54; color: white; border: none; border-radius: 25px; cursor: pointer; font-weight: 500; }
+        .send-area button { padding: 10px 25px; background: #075e54; color: white; border: none; border-radius: 25px; cursor: pointer; font-weight: 500; white-space: nowrap; }
         .send-area button:hover:not(:disabled) { background: #064a42; }
         .send-area button:disabled { background: #999; cursor: not-allowed; }
         .loading { text-align: center; padding: 20px; color: #666; }
-        .error { color: #f44336; padding: 10px; text-align: center; }
+        .info-bar { padding: 10px 20px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; font-size: 13px; color: #666; flex-wrap: wrap; gap: 5px; }
         .unread-badge { background: #f44336; color: white; border-radius: 50%; padding: 2px 8px; font-size: 12px; margin-left: 8px; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .message { animation: fadeIn 0.3s; }
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; }
         ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+        @media (max-width: 600px) {
+            .header { padding: 15px; }
+            .header h1 { font-size: 16px; }
+            .send-area { padding: 15px; }
+            .send-area input { min-width: 150px; }
+            .message-content { max-width: 85%; }
+        }
     </style>
 </head>
 <body>
@@ -44,15 +51,18 @@
                 <span id="unreadBadge" class="unread-badge" style="display:none;">0</span>
             </div>
         </div>
+        <div class="info-bar">
+            <span id="messageCount">Loading...</span>
+            <span id="lastUpdate">Last update: --</span>
+        </div>
         <div class="messages" id="messages">
-            <div class="loading">Loading messages...</div>
+            <div class="loading">📭 Loading messages...</div>
         </div>
         <div class="send-area">
             <input type="text" id="messageInput" placeholder="Type a message..." disabled>
             <button id="sendButton" disabled>Send</button>
         </div>
     </div>
-
     <script src="script.js"></script>
 </body>
 </html>

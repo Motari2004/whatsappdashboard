@@ -7,6 +7,7 @@ let isConnected = false;
 let currentQR = null;
 let reconnectTimer = null;
 let messageQueue = [];
+let connectionAttempts = 0;
 
 // Database connection
 async function getDb() {
@@ -43,8 +44,8 @@ async function getDb() {
         
         CREATE TABLE IF NOT EXISTS auth_state (
             id VARCHAR(50) PRIMARY KEY,
-            creds JSONB,
-            keys JSONB,
+            creds JSONB DEFAULT '{}'::jsonb,
+            keys JSONB DEFAULT '{}'::jsonb,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `);
@@ -52,9 +53,16 @@ async function getDb() {
     return pool;
 }
 
-// Custom auth state using database
+// Custom auth state using database with proper initialization
 async function useDbAuthState() {
     const db = await getDb();
+    
+    // Initialize auth state if not exists
+    await db.query(
+        `INSERT INTO auth_state (id, creds, keys, updated_at)
+         VALUES ('whatsapp_auth', '{}'::jsonb, '{}'::jsonb, CURRENT_TIMESTAMP)
+         ON CONFLICT (id) DO NOTHING`
+    );
     
     let result = await db.query(
         `SELECT creds, keys FROM auth_state WHERE id = 'whatsapp_auth'`
@@ -67,25 +75,24 @@ async function useDbAuthState() {
         creds = result.rows[0].creds || {};
         keys = result.rows[0].keys || {};
         console.log('✅ Loaded auth from database');
-    } else {
-        console.log('📝 No existing auth found, will create new');
     }
     
     const saveCreds = async () => {
         try {
+            // Get current state from socket
             const currentCreds = sock?.authState?.creds || {};
             const currentKeys = sock?.authState?.keys || {};
             
-            await db.query(
-                `INSERT INTO auth_state (id, creds, keys, updated_at)
-                 VALUES ('whatsapp_auth', $1, $2, CURRENT_TIMESTAMP)
-                 ON CONFLICT (id) DO UPDATE SET 
-                    creds = EXCLUDED.creds,
-                    keys = EXCLUDED.keys,
-                    updated_at = CURRENT_TIMESTAMP`,
-                [currentCreds, currentKeys]
-            );
-            console.log('💾 Auth saved to database');
+            // Only save if we have valid data
+            if (Object.keys(currentCreds).length > 0 || Object.keys(currentKeys).length > 0) {
+                await db.query(
+                    `UPDATE auth_state 
+                     SET creds = $1, keys = $2, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = 'whatsapp_auth'`,
+                    [currentCreds, currentKeys]
+                );
+                console.log('💾 Auth saved to database');
+            }
         } catch (error) {
             console.error('Failed to save auth:', error);
         }
@@ -100,7 +107,7 @@ async function useDbAuthState() {
     };
 }
 
-// Load Baileys correctly - FIXED IMPORT
+// Load Baileys
 let makeWASocket = null;
 let DisconnectReason = null;
 let Browsers = null;
@@ -111,26 +118,30 @@ async function loadBaileys() {
     
     try {
         const baileys = await import('@whiskeysockets/baileys');
-        
-        // FIX: Properly extract the exports
         makeWASocket = baileys.makeWASocket || baileys.default?.makeWASocket;
         DisconnectReason = baileys.DisconnectReason;
         Browsers = baileys.Browsers;
-        
-        // If still not found, try alternative import
-        if (!makeWASocket) {
-            console.log('🔄 Trying alternative import method...');
-            const baileysAlt = await import('@whiskeysockets/baileys/lib');
-            makeWASocket = baileysAlt.makeWASocket || baileysAlt.default?.makeWASocket;
-        }
-        
         baileysLoaded = true;
         console.log('✅ Baileys loaded successfully');
-        console.log('🔍 makeWASocket type:', typeof makeWASocket);
-        console.log('🔍 makeWASocket is function:', typeof makeWASocket === 'function');
     } catch (error) {
         console.error('❌ Failed to load Baileys:', error);
         throw error;
+    }
+}
+
+// Reset auth if handshake fails
+async function resetAuth() {
+    console.log('🔄 Resetting auth state...');
+    try {
+        const db = await getDb();
+        await db.query(
+            `UPDATE auth_state 
+             SET creds = '{}'::jsonb, keys = '{}'::jsonb, updated_at = CURRENT_TIMESTAMP
+             WHERE id = 'whatsapp_auth'`
+        );
+        console.log('✅ Auth reset successfully');
+    } catch (error) {
+        console.error('Failed to reset auth:', error);
     }
 }
 
@@ -140,30 +151,28 @@ async function connectWhatsApp() {
         await loadBaileys();
         
         if (typeof makeWASocket !== 'function') {
-            console.error('❌ makeWASocket is not a function. Type:', typeof makeWASocket);
-            // Try to load again with different method
             const baileys = await import('@whiskeysockets/baileys');
-            // Try different export patterns
-            makeWASocket = baileys.default?.makeWASocket || 
-                          baileys.makeWASocket || 
-                          baileys.default;
-            
-            if (typeof makeWASocket !== 'function') {
-                throw new Error('Cannot find makeWASocket function. Available exports: ' + Object.keys(baileys).join(', '));
-            }
+            makeWASocket = baileys.makeWASocket || baileys.default;
         }
         
-        console.log('🔄 Connecting to WhatsApp...');
+        console.log('🔄 Connecting to WhatsApp... (Attempt', connectionAttempts + 1, ')');
+        connectionAttempts++;
         
         const { state, saveCreds } = await useDbAuthState();
         
+        // Create socket with proper options
         sock = makeWASocket({
             auth: state,
-            connectTimeoutMs: 30000,
+            connectTimeoutMs: 60000,
             keepAliveIntervalMs: 30000,
             defaultQueryTimeoutMs: 120000,
             printQRInTerminal: true,
-            browser: Browsers?.macOS('Desktop') || ['Chrome', 'Desktop', '1.0.0']
+            browser: ['Chrome', 'Desktop', '1.0.0'],
+            syncFullHistory: false,
+            markOnlineOnConnect: true,
+            patchMessageBeforeSending: true,
+            // Important: Don't use cached data
+            generateHighQualityLinkPreview: false
         });
 
         sock.ev.on('creds.update', saveCreds);
@@ -194,7 +203,9 @@ async function connectWhatsApp() {
             }
             
             if (connection === 'close') {
-                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason?.loggedOut;
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                const shouldReconnect = statusCode !== DisconnectReason?.loggedOut;
+                
                 isConnected = false;
                 currentQR = null;
                 
@@ -208,14 +219,27 @@ async function connectWhatsApp() {
                         updated_at = CURRENT_TIMESTAMP`
                 );
 
-                if (shouldReconnect) {
-                    console.log('🔄 Reconnecting...');
+                // If handshake error, reset auth
+                if (lastDisconnect?.error?.message?.includes('public')) {
+                    console.log('⚠️ Handshake error detected, resetting auth...');
+                    await resetAuth();
+                    connectionAttempts = 0;
+                }
+
+                if (shouldReconnect && connectionAttempts < 10) {
+                    console.log('🔄 Reconnecting in 3 seconds...');
                     if (reconnectTimer) clearTimeout(reconnectTimer);
+                    reconnectTimer = setTimeout(() => connectWhatsApp(), 3000);
+                } else if (connectionAttempts >= 10) {
+                    console.log('❌ Max attempts reached. Resetting and retrying...');
+                    await resetAuth();
+                    connectionAttempts = 0;
                     reconnectTimer = setTimeout(() => connectWhatsApp(), 5000);
                 }
             } else if (connection === 'open') {
                 isConnected = true;
                 currentQR = null;
+                connectionAttempts = 0;
                 console.log('✅ WhatsApp Connected!');
                 
                 const db = await getDb();
@@ -228,6 +252,7 @@ async function connectWhatsApp() {
                         updated_at = CURRENT_TIMESTAMP`
                 );
 
+                // Process queued messages
                 if (messageQueue.length > 0) {
                     console.log(`📤 Sending ${messageQueue.length} queued messages...`);
                     for (const msg of messageQueue) {
@@ -240,6 +265,8 @@ async function connectWhatsApp() {
                     }
                     messageQueue = [];
                 }
+            } else if (connection === 'connecting') {
+                console.log('⏳ Connecting to WhatsApp...');
             }
         });
 
@@ -273,6 +300,11 @@ async function connectWhatsApp() {
             }
         });
 
+        // Handle errors
+        sock.ev.on('error', (error) => {
+            console.error('❌ Socket error:', error);
+        });
+
         return sock;
 
     } catch (error) {
@@ -286,6 +318,7 @@ async function connectWhatsApp() {
 // Start connection
 (async () => {
     try {
+        console.log('🚀 Starting WhatsApp service...');
         await connectWhatsApp();
     } catch (error) {
         console.error('Failed to initialize:', error);
@@ -321,8 +354,42 @@ module.exports = async (req, res) => {
                 connected: isConnected,
                 status: status.status || 'unknown',
                 qrCode: status.qr_code || null,
+                attempts: connectionAttempts,
                 timestamp: new Date().toISOString()
             });
+        }
+
+        // ============ GET /api/debug ============
+        if (path === 'debug' && req.method === 'GET') {
+            const result = await db.query(
+                `SELECT * FROM status WHERE id = 'whatsapp_status'`
+            );
+            const authResult = await db.query(
+                `SELECT id, creds, keys, updated_at FROM auth_state WHERE id = 'whatsapp_auth'`
+            );
+            
+            return res.json({
+                connected: isConnected,
+                sockExists: !!sock,
+                status: result.rows[0] || null,
+                authExists: authResult.rows.length > 0,
+                authData: authResult.rows[0] || null,
+                attempts: connectionAttempts,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        // ============ GET /api/reset-auth ============
+        if (path === 'reset-auth' && req.method === 'POST') {
+            await resetAuth();
+            if (sock) {
+                try { sock.end(); } catch (e) {}
+                sock = null;
+            }
+            isConnected = false;
+            connectionAttempts = 0;
+            setTimeout(() => connectWhatsApp(), 1000);
+            return res.json({ success: true, message: 'Auth reset and reconnecting' });
         }
 
         // ============ GET /api/messages ============

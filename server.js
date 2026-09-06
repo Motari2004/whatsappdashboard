@@ -1,15 +1,23 @@
 const { Pool } = require('pg');
 const QRCode = require('qrcode');
 
-// Use dynamic import for Baileys (ESM)
 let makeWASocket, useMultiFileAuthState, DisconnectReason;
+let baileysLoaded = false;
 
 async function loadBaileys() {
-    const baileys = await import('@whiskeysockets/baileys');
-    makeWASocket = baileys.default;
-    useMultiFileAuthState = baileys.useMultiFileAuthState;
-    DisconnectReason = baileys.DisconnectReason;
-    console.log('✅ Baileys loaded successfully');
+    if (!baileysLoaded) {
+        try {
+            const baileys = await import('@whiskeysockets/baileys');
+            makeWASocket = baileys.default || baileys.makeWASocket;
+            useMultiFileAuthState = baileys.useMultiFileAuthState;
+            DisconnectReason = baileys.DisconnectReason;
+            baileysLoaded = true;
+            console.log('✅ Baileys loaded successfully');
+        } catch (error) {
+            console.error('❌ Failed to load Baileys:', error);
+            throw error;
+        }
+    }
 }
 
 let pool = null;
@@ -18,7 +26,6 @@ let isConnected = false;
 let currentQR = null;
 let reconnectTimer = null;
 let messageQueue = [];
-let baileysLoaded = false;
 
 // ============ DATABASE ============
 async function getDb() {
@@ -57,11 +64,8 @@ async function getDb() {
 // ============ WHATSAPP CONNECTION ============
 async function connectWhatsApp() {
     try {
-        if (!baileysLoaded) {
-            await loadBaileys();
-            baileysLoaded = true;
-        }
-
+        await loadBaileys();
+        
         console.log('🔄 Connecting to WhatsApp...');
         
         const { state, saveCreds } = await useMultiFileAuthState('./auth_info');
@@ -75,14 +79,11 @@ async function connectWhatsApp() {
             browser: ['Chrome', 'Desktop', '1.0.0']
         });
 
-        // Save credentials
         sock.ev.on('creds.update', saveCreds);
 
-        // Handle connection updates
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             
-            // Handle QR code
             if (qr) {
                 currentQR = qr;
                 console.log('📱 QR Code generated');
@@ -104,7 +105,6 @@ async function connectWhatsApp() {
                 }
             }
             
-            // Handle connection status
             if (connection === 'close') {
                 const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
                 isConnected = false;
@@ -139,7 +139,6 @@ async function connectWhatsApp() {
                         updated_at = CURRENT_TIMESTAMP`
                 );
 
-                // Process any queued messages
                 if (messageQueue.length > 0) {
                     console.log(`📤 Sending ${messageQueue.length} queued messages...`);
                     for (const msg of messageQueue) {
@@ -155,7 +154,6 @@ async function connectWhatsApp() {
             }
         });
 
-        // Handle incoming messages
         sock.ev.on('messages.upsert', async ({ messages }) => {
             try {
                 const db = await getDb();
@@ -196,10 +194,9 @@ async function connectWhatsApp() {
     }
 }
 
-// Start connection after Baileys loads
+// Start connection
 (async () => {
     try {
-        await loadBaileys();
         await connectWhatsApp();
     } catch (error) {
         console.error('Failed to initialize:', error);
@@ -208,7 +205,6 @@ async function connectWhatsApp() {
 
 // ============ EXPRESS HANDLER ============
 module.exports = async (req, res) => {
-    // Enable CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
@@ -276,7 +272,6 @@ module.exports = async (req, res) => {
                 return res.status(400).json({ error: 'Missing to or message' });
             }
 
-            // If not connected, queue the message
             if (!isConnected || !sock) {
                 messageQueue.push({ to, message });
                 console.log(`📝 Queued message to ${to} (not connected)`);
@@ -287,11 +282,9 @@ module.exports = async (req, res) => {
                 });
             }
 
-            // Send the message
             try {
                 const msg = await sock.sendMessage(to, { text: message });
                 
-                // Store sent message
                 await db.query(
                     `INSERT INTO messages (id, from_id, body, timestamp, from_me, processed)
                      VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -353,7 +346,6 @@ module.exports = async (req, res) => {
             });
         }
 
-        // 404
         return res.status(404).json({ 
             error: 'Not found', 
             path: `/api/${path}` 

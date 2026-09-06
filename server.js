@@ -100,10 +100,9 @@ async function useDbAuthState() {
     };
 }
 
-// Load Baileys correctly
+// Load Baileys correctly - FIXED IMPORT
 let makeWASocket = null;
 let DisconnectReason = null;
-let useMultiFileAuthState = null;
 let Browsers = null;
 let baileysLoaded = false;
 
@@ -112,14 +111,23 @@ async function loadBaileys() {
     
     try {
         const baileys = await import('@whiskeysockets/baileys');
-        // Fix: Get the default export correctly
-        makeWASocket = baileys.default || baileys.makeWASocket;
+        
+        // FIX: Properly extract the exports
+        makeWASocket = baileys.makeWASocket || baileys.default?.makeWASocket;
         DisconnectReason = baileys.DisconnectReason;
-        useMultiFileAuthState = baileys.useMultiFileAuthState;
         Browsers = baileys.Browsers;
+        
+        // If still not found, try alternative import
+        if (!makeWASocket) {
+            console.log('🔄 Trying alternative import method...');
+            const baileysAlt = await import('@whiskeysockets/baileys/lib');
+            makeWASocket = baileysAlt.makeWASocket || baileysAlt.default?.makeWASocket;
+        }
+        
         baileysLoaded = true;
         console.log('✅ Baileys loaded successfully');
         console.log('🔍 makeWASocket type:', typeof makeWASocket);
+        console.log('🔍 makeWASocket is function:', typeof makeWASocket === 'function');
     } catch (error) {
         console.error('❌ Failed to load Baileys:', error);
         throw error;
@@ -131,8 +139,18 @@ async function connectWhatsApp() {
     try {
         await loadBaileys();
         
-        if (!makeWASocket) {
-            throw new Error('makeWASocket is not loaded');
+        if (typeof makeWASocket !== 'function') {
+            console.error('❌ makeWASocket is not a function. Type:', typeof makeWASocket);
+            // Try to load again with different method
+            const baileys = await import('@whiskeysockets/baileys');
+            // Try different export patterns
+            makeWASocket = baileys.default?.makeWASocket || 
+                          baileys.makeWASocket || 
+                          baileys.default;
+            
+            if (typeof makeWASocket !== 'function') {
+                throw new Error('Cannot find makeWASocket function. Available exports: ' + Object.keys(baileys).join(', '));
+            }
         }
         
         console.log('🔄 Connecting to WhatsApp...');
@@ -145,7 +163,7 @@ async function connectWhatsApp() {
             keepAliveIntervalMs: 30000,
             defaultQueryTimeoutMs: 120000,
             printQRInTerminal: true,
-            browser: ['Chrome', 'Desktop', '1.0.0']
+            browser: Browsers?.macOS('Desktop') || ['Chrome', 'Desktop', '1.0.0']
         });
 
         sock.ev.on('creds.update', saveCreds);
